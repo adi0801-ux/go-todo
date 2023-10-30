@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"github.com/go-chi/chi"
 	"github.com/go-chi/chi/middleware"
 	"github.com/thedevsaddam/renderer"
@@ -8,6 +9,8 @@ import (
 	"gopkg.in/mgo.v2/bson"
 	"log"
 	"net/http"
+	"os"
+	"os/signal"
 	"time"
 )
 
@@ -20,7 +23,7 @@ const (
 	collectionName string = "todo"
 	port           string = ":9000"
 )
-
+//struct to get data from mongoDB
 type todoModel struct {
 	ID        bson.ObjectId `bson:"_id, omitempty"`
 	Title     string        `bson:"title"`
@@ -28,6 +31,7 @@ type todoModel struct {
 	CreatedAt time.Time     `bson:"createdAt"`
 }
 
+//struct to interact with json data(frontend)
 type todo struct {
 	ID        string    `json:"id"`
 	Title     string    `json:"title"`
@@ -43,7 +47,31 @@ func init() {
 	sess.SetMode(mgo.Monotonic, true)
 	db = sess.DB(dbName)
 }
+func fetchTodo(w http.ResponseWriter, r*http.Request){
+	todos:=[]todoModel{}
+	if err:=db.C(collectionName).Find(bson.M{}).All(&todos); err!=nil{
+		rnd.JSON(w, http.StatusProcessing, renderer.M{
+			"message":"Failed to fetch todo",
+			"error":err,
+		})
+		return
+	}
+	todoList:=[]todo{}
+	for _,t:=range todos{
+		todoList=append(todoList, todo{
+			ID:t.ID.Hex(),
+			Title: t.Title,
+			Completed: t.Completed,
+			CreatedAt: t.CreatedAt,
+		})
+	}
+	rnd.JSON(w, http.StatusOK, renderer.M{
+		"data":todoList,
+	})
+}
 func main() {
+	stopChan := make(chan os.Signal)
+	signal.Notify(stopChan, os.Interrupt)
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
 	r.Get("/", homeHandler)
@@ -63,7 +91,13 @@ func main() {
 			log.Println("listen:%s\n", err)
 		}
 	}()
-
+	<-stopChan
+	log.Println("shutting down server...")
+	ctx, cancel := context.WithTimeout(context.Background(),5*time.Second)
+	srv.Shutdown(ctx)
+	defer cancel(
+		log.Println("server gracefully stopped")
+		)
 }
 func todoHandler() http.Handler {
 	rg := chi.NewRouter()
