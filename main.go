@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"github.com/go-chi/chi"
 	"github.com/go-chi/chi/middleware"
 	"github.com/thedevsaddam/renderer"
@@ -11,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"time"
 )
 
@@ -66,8 +68,55 @@ func fetchTodo(w http.ResponseWriter, r*http.Request){
 		})
 	}
 	rnd.JSON(w, http.StatusOK, renderer.M{
-		"data":todoList,
+		"data":todoList, 
 	})
+}
+func createTodo(w http.ResponseWriter, r*http.Request){
+	var t todo
+	if err:=json.NewDecoder(r.Body).Decode(&t); err!=nil{
+		rnd.JSON(w, http.StatusProcessing,err)
+		return;
+	}
+	if t.Title==""{
+		rnd.JSON(w,http.StatusProcessing, renderer.M{
+			"message":"title is blank",
+		})
+		return
+	}
+	ts:=todoModel{
+		ID: bson.NewObjectId(),
+		Title: t.Title,
+		Completed: false,
+		CreatedAt: time.Now(),
+	}
+	if err:=db.C(collectionName).Insert(&ts); err!=nil{
+		rnd.JSON(w, http.StatusProcessing, renderer.M{
+			"message":"todo not saved in db",
+			"error":err,
+		})
+		return
+	}
+	rnd.JSON(w, http.StatusProcessing, renderer.M{
+		"message":"todo created successfullly",
+		"todoId":ts.ID,
+	})
+}
+func deleteTodo(w http.ResponseWriter, r*http.Request){
+	id:= strings.TrimSpace(chi.URLParam(r, "id"))
+	 if !bson.IsObjectIdHex(id){
+		 rnd.JSON(w, http.StatusProcessing, renderer.M{
+			 "message":"invalid id",
+		 })
+		 return
+	 }
+	 if err:= db.C(collectionName).RemoveId(bson.ObjectIdHex(id)); err!=nil{
+		 rnd.JSON(w ,http.StatusProcessing, renderer.M{
+			 "message":"failed to delete todo",
+			 "error":err,
+		 })
+		 return
+	 }
+	 rnd.JSON(w, http.StatusOK, renderer.M{"message":"todo deleted"}),
 }
 func main() {
 	stopChan := make(chan os.Signal)
